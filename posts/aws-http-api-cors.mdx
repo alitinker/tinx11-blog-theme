@@ -10,7 +10,10 @@ configure CORS. If you're accustomed to using REST API, you might know that conf
 I didn't find that to be the case with HTTP API. This post documents the implementation for the benefit of my
 future self, and anyone else who might run into the same issues I did.
 
-Read the preamble, or skip to the solution.
+When I initially wrote this post, I included a long preamble about what a preflight OPTIONS request is.
+I think it's helpful to understand how a preflight request works if you want to get better at troubleshooting
+CORS errors. I felt that it warranted a separate post. You can read about preflight OPTIONS requests here
+(recommended), or skip down to the solution.
 
 Troubleshooting CORS errors becomes a lot easier once you understand what a preflight OPTIONS request does.
 If you've ever made a call to a cross-domain API from a frontend application, you might've noticed there are
@@ -19,6 +22,13 @@ OPTIONS request. The preflight request is an interstitial request that your brow
 makes a preflight request in order to retrieve the header attributes that describe what request data is allowed and
 expected by that server. If the preflight request is successful (the response returns 200 OK), then it will attempt
 to make the second request--the call to the API endpoint initiated by your application code.
+
+Preflight OPTIONS requests are made when:
+1. A cross-origin POST or PUT request is sent
+2. _Any_ cross-origin request is sent that includes the `Authorization` header
+
+A preflight request is _always_ made prior to a cross-origin POST request. You won't see a preflight request made
+prior to GET requests unless you send the `Authorization` header in the GET request.
 
 If you only test your API in a desktop client like Postman, preflight errors can go unnoticed for awhile. CORS errors
 will never appear in Postman because the request is never routed through a browser.
@@ -93,4 +103,40 @@ The important bit in this code snippet is the addition of `OPTIONS` in the list 
         # ...the rest of your code
 ```
 
+## The Cloudformation template
+
+The next step would be to configure the routes you'll need for the HTTP API service in API Gateway.
+These can be added via the CFN template that you include as part of your IAC codebase. You'll need to make sure you
+configure an OPTIONS method _and_ the POST, GET, or PUT endpoint that you need.
+
+Configuration for the OPTIONS route:
+```yaml
+  ApiGatewayRouteJobOPTIONS:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue: !Sub '${AWS::AccountId}-ApiId'
+      RouteKey: 'OPTIONS /job'
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref ApiGatewayIntegration
+```
+
+Configuration for the POST route:
+```yaml
+  ApiGatewayRouteJobPOST:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue: !Sub '${AWS::AccountId}-ApiId'
+      RouteKey: 'POST /job'
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref ApiGatewayIntegration
+      AuthorizationType: JWT
+      AuthorizerId:
+        Fn::ImportValue: !Sub '${AWS::AccountId}-ApiAuthorizerId'
+```
 
