@@ -1,0 +1,96 @@
+---
+title: Configuring CORS in AWS HTTP API
+description: "Configuring CORS in AWS HTTP API isn't as straightforward as you might imagine. This post covers one method of implementation."
+date: Jan 19 2023
+---
+
+I recently completed a project where I built a HTTP API in AWS API Gateway. The relatively new HTTP API,
+while RESTful, has some significant differences from REST API. One of those differences is the way in which you
+configure CORS. If you're accustomed to using REST API, you might know that configuring CORS is fairly intuitive.
+I didn't find that to be the case with HTTP API. This post documents the implementation for the benefit of my
+future self, and anyone else who might run into the same issues I did.
+
+Read the preamble, or skip to the solution.
+
+Troubleshooting CORS errors becomes a lot easier once you understand what a preflight OPTIONS request does.
+If you've ever made a call to a cross-domain API from a frontend application, you might've noticed there are
+two requests that occur when a call to the API endpoint is initiated. The first of those requests is called a preflight
+OPTIONS request. The preflight request is an interstitial request that your browser makes to the server. The browser
+makes a preflight request in order to retrieve the header attributes that describe what request data is allowed and
+expected by that server. If the preflight request is successful (the response returns 200 OK), then it will attempt
+to make the second request--the call to the API endpoint initiated by your application code.
+
+If you only test your API in a desktop client like Postman, preflight errors can go unnoticed for awhile. CORS errors
+will never appear in Postman because the request is never routed through a browser.
+
+CORS errors can occur for several reasons. Sometimes they can be misleading, and indicative of other issues in your
+application that aren't directly related to the preflight request. In this case, we're concerned only with errors
+related to proper handling of the preflight OPTIONS request. When the browser isn't able to successfully make this
+request, you'll see the classic CORS error that we all know and despise.
+
+You can check the status of the preflight request by inspecting the network requests that your application is making.
+You should see a request labeled 'preflight', sent with OPTIONS as the request method. If the status code in the
+response indicates an error, then you likely need to configure your server side code and infrastructure to allow the
+preflight request, and return the headers that the browser expects to receive.
+
+## The client side code
+
+All CORS configuration is handled on the server side. If you're new to CORS errors, you might assume the problem lies
+within the frontend code, and that perhaps you're not sending the correct headers in the request.
+
+In fact, there's very little required of the frontend. Assuming your API call is sending a JSON payload, and some
+form of Authorization, the only headers you need are `Content-Type` and `Authorization`. You should ensure that
+your frontend code is sending only those headers required by the server, and nothing more. Adding more headers than
+are necessary can sometimes cause further problems, and prevent you from finding the true source of your CORS error.
+
+```js
+    // A GET request made with Axios
+    const token = await getJWT();
+    const resp = await axios.get(`${baseUrl}/jobs`, {
+        headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        })
+    const data = await resp?.data;
+    ...
+```
+
+## The server side code
+
+Your server side code should be doing two things:
+1. Allowing a browser to complete a preflight OPTIONS request
+2. Returning all the headers that the browser expects to receive in the preflight response
+
+I've provided some examples of how to achieve this in a simple Flask API. The guidance applies regardless of whether
+you're using AWS Lambda or a back-end framework to construct your API.
+
+In order to return the required headers in every response, the easiest thing to do is use the .
+
+```python
+    import flask
+    from flask_cors import CORS
+
+    # App Configuration ---------------
+
+    app = flask.Flask("my-api")
+    # Provides headers required by a cross-origin request
+    CORS(app)
+```
+
+The important bit in this code snippet is the addition of `OPTIONS` in the list of allowed methods.
+
+```python
+    @ms_api_routes.route("/jobs", methods=['GET', 'OPTIONS'])
+    def list_jobs():
+        """
+        Accepts GET and OPTIONS methods
+        """
+        try:
+            if request.method == 'OPTIONS':
+                return jsonify(message="OK")
+
+        # ...the rest of your code
+```
+
+
